@@ -23,6 +23,7 @@ import (
 	"time"
 )
 
+// mysqlConn表示与MySQL服务器的连接。
 type mysqlConn struct {
 	buf              buffer
 	netConn          net.Conn
@@ -39,6 +40,7 @@ type mysqlConn struct {
 	parseTime        bool
 
 	// for context support (Go 1.8+)
+	// 用于上下文支持 (Go 1.8+)
 	watching bool
 	watcher  chan<- context.Context
 	closech  chan struct{}
@@ -48,6 +50,7 @@ type mysqlConn struct {
 }
 
 // Helper function to call per-connection logger.
+// 辅助函数调用每个连接的日志记录器。
 func (mc *mysqlConn) log(v ...any) {
 	_, filename, lineno, ok := runtime.Caller(1)
 	if ok {
@@ -63,12 +66,14 @@ func (mc *mysqlConn) log(v ...any) {
 }
 
 // Handles parameters set in DSN after the connection is established
+// 处理在连接建立后在DSN中设置的参数
 func (mc *mysqlConn) handleParams() (err error) {
 	var cmdSet strings.Builder
 
 	for param, val := range mc.cfg.Params {
 		if cmdSet.Len() == 0 {
 			// Heuristic: 29 chars for each other key=value to reduce reallocations
+			// 启发式：每个其他键=值29个字符以减少重新分配
 			cmdSet.Grow(4 + len(param) + 3 + len(val) + 30*(len(mc.cfg.Params)-1))
 			cmdSet.WriteString("SET ")
 		} else {
@@ -88,6 +93,8 @@ func (mc *mysqlConn) handleParams() (err error) {
 
 // markBadConn replaces errBadConnNoWrite with driver.ErrBadConn.
 // This function is used to return driver.ErrBadConn only when safe to retry.
+// markBadConn将errBadConnNoWrite替换为driver.ErrBadConn。
+// 此函数仅在安全重试时用于返回driver.ErrBadConn。
 func (mc *mysqlConn) markBadConn(err error) error {
 	if err == errBadConnNoWrite {
 		return driver.ErrBadConn
@@ -118,6 +125,7 @@ func (mc *mysqlConn) begin(readOnly bool) (driver.Tx, error) {
 
 func (mc *mysqlConn) Close() (err error) {
 	// Makes Close idempotent
+	// 使Close幂等
 	if !mc.closed.Load() {
 		err = mc.writeCommandPacket(comQuit)
 	}
@@ -126,6 +134,7 @@ func (mc *mysqlConn) Close() (err error) {
 }
 
 // close closes the network connection and clear results without sending COM_QUIT.
+// close关闭网络连接并清除结果而不发送COM_QUIT。
 func (mc *mysqlConn) close() {
 	mc.cleanup()
 	mc.clearResult()
@@ -135,12 +144,15 @@ func (mc *mysqlConn) close() {
 // function after successfully authentication, call Close instead. This function
 // is called before auth or on auth failure because MySQL will have already
 // closed the network connection.
+// 关闭网络连接并取消设置内部变量。成功认证后不要调用此函数，而是调用Close。
+// 此函数在认证之前或认证失败时调用，因为MySQL将已经关闭网络连接。
 func (mc *mysqlConn) cleanup() {
 	if mc.closed.Swap(true) {
 		return
 	}
 
 	// Makes cleanup idempotent
+	// 使cleanup幂等
 	close(mc.closech)
 	conn := mc.rawConn
 	if conn == nil {
@@ -152,6 +164,9 @@ func (mc *mysqlConn) cleanup() {
 	// This function can be called from multiple goroutines.
 	// So we can not mc.clearResult() here.
 	// Caller should do it if they are in safe goroutine.
+	// 此函数可以从多个goroutine调用。
+	// 因此我们不能在此处调用mc.clearResult()。
+	// 如果调用者在安全的goroutine中，他们应该这样做。
 }
 
 func (mc *mysqlConn) error() error {
@@ -169,9 +184,11 @@ func (mc *mysqlConn) Prepare(query string) (driver.Stmt, error) {
 		return nil, driver.ErrBadConn
 	}
 	// Send command
+	// 发送命令
 	err := mc.writeCommandPacketStr(comStmtPrepare, query)
 	if err != nil {
 		// STMT_PREPARE is safe to retry.  So we can return ErrBadConn here.
+		// STMT_PREPARE可以安全重试。因此我们可以在此返回ErrBadConn。
 		mc.log(err)
 		return nil, driver.ErrBadConn
 	}
@@ -181,6 +198,7 @@ func (mc *mysqlConn) Prepare(query string) (driver.Stmt, error) {
 	}
 
 	// Read Result
+	// 读取结果
 	columnCount, err := stmt.readPrepareResultPacket()
 	if err == nil {
 		if stmt.paramCount > 0 {
@@ -199,6 +217,7 @@ func (mc *mysqlConn) Prepare(query string) (driver.Stmt, error) {
 
 func (mc *mysqlConn) interpolateParams(query string, args []driver.Value) (string, error) {
 	// Number of ? should be same to len(args)
+	// ?的数量应与len(args)相同
 	if strings.Count(query, "?") != len(args) {
 		return "", driver.ErrSkip
 	}
@@ -206,9 +225,12 @@ func (mc *mysqlConn) interpolateParams(query string, args []driver.Value) (strin
 	buf, err := mc.buf.takeCompleteBuffer()
 	if err != nil {
 		// can not take the buffer. Something must be wrong with the connection
+		// 无法获取缓冲区。连接一定有问题
 		mc.cleanup()
 		// interpolateParams would be called before sending any query.
 		// So its safe to retry.
+		// interpolateParams将在发送任何查询之前调用。
+		// 因此可以安全重试。
 		return "", driver.ErrBadConn
 	}
 	buf = buf[:0]
@@ -236,6 +258,7 @@ func (mc *mysqlConn) interpolateParams(query string, args []driver.Value) (strin
 			buf = strconv.AppendInt(buf, v, 10)
 		case uint64:
 			// Handle uint64 explicitly because our custom ConvertValue emits unsigned values
+			// 显式处理uint64，因为我们的自定义ConvertValue会发出无符号值
 			buf = strconv.AppendUint(buf, v, 10)
 		case float64:
 			buf = strconv.AppendFloat(buf, v, 'g', -1, 64)
@@ -307,6 +330,7 @@ func (mc *mysqlConn) Exec(query string, args []driver.Value) (driver.Result, err
 			return nil, driver.ErrSkip
 		}
 		// try to interpolate the parameters to save extra roundtrips for preparing and closing a statement
+		// 尝试插值参数以节省准备和关闭语句的额外往返
 		prepared, err := mc.interpolateParams(query, args)
 		if err != nil {
 			return nil, err
@@ -323,14 +347,17 @@ func (mc *mysqlConn) Exec(query string, args []driver.Value) (driver.Result, err
 }
 
 // Internal function to execute commands
+// 执行命令的内部函数
 func (mc *mysqlConn) exec(query string) error {
 	handleOk := mc.clearResult()
 	// Send command
+	// 发送命令
 	if err := mc.writeCommandPacketStr(comQuery, query); err != nil {
 		return mc.markBadConn(err)
 	}
 
 	// Read Result
+	// 读取结果
 	resLen, err := handleOk.readResultSetHeaderPacket()
 	if err != nil {
 		return err
@@ -338,11 +365,13 @@ func (mc *mysqlConn) exec(query string) error {
 
 	if resLen > 0 {
 		// columns
+		// 列
 		if err := mc.readUntilEOF(); err != nil {
 			return err
 		}
 
 		// rows
+		// 行
 		if err := mc.readUntilEOF(); err != nil {
 			return err
 		}
@@ -366,6 +395,7 @@ func (mc *mysqlConn) query(query string, args []driver.Value) (*textRows, error)
 			return nil, driver.ErrSkip
 		}
 		// try client-side prepare to reduce roundtrip
+		// 尝试客户端准备以减少往返
 		prepared, err := mc.interpolateParams(query, args)
 		if err != nil {
 			return nil, err
@@ -373,12 +403,14 @@ func (mc *mysqlConn) query(query string, args []driver.Value) (*textRows, error)
 		query = prepared
 	}
 	// Send command
+	// 发送命令
 	err := mc.writeCommandPacketStr(comQuery, query)
 	if err != nil {
 		return nil, mc.markBadConn(err)
 	}
 
 	// Read Result
+	// 读取结果
 	var resLen int
 	resLen, err = handleOk.readResultSetHeaderPacket()
 	if err != nil {
@@ -400,20 +432,25 @@ func (mc *mysqlConn) query(query string, args []driver.Value) (*textRows, error)
 	}
 
 	// Columns
+	// 列
 	rows.rs.columns, err = mc.readColumns(resLen)
 	return rows, err
 }
 
 // Gets the value of the given MySQL System Variable
 // The returned byte slice is only valid until the next read
+// 获取给定MySQL系统变量的值
+// 返回的字节切片仅在下次读取之前有效
 func (mc *mysqlConn) getSystemVar(name string) ([]byte, error) {
 	// Send command
+	// 发送命令
 	handleOk := mc.clearResult()
 	if err := mc.writeCommandPacketStr(comQuery, "SELECT @@"+name); err != nil {
 		return nil, err
 	}
 
 	// Read Result
+	// 读取结果
 	resLen, err := handleOk.readResultSetHeaderPacket()
 	if err == nil {
 		rows := new(textRows)
@@ -422,6 +459,7 @@ func (mc *mysqlConn) getSystemVar(name string) ([]byte, error) {
 
 		if resLen > 0 {
 			// Columns
+			// 列
 			if err := mc.readUntilEOF(); err != nil {
 				return nil, err
 			}
@@ -436,12 +474,14 @@ func (mc *mysqlConn) getSystemVar(name string) ([]byte, error) {
 }
 
 // finish is called when the query has canceled.
+// 当查询被取消时调用finish。
 func (mc *mysqlConn) cancel(err error) {
 	mc.canceled.Set(err)
 	mc.cleanup()
 }
 
 // finish is called when the query has succeeded.
+// 当查询成功时调用finish。
 func (mc *mysqlConn) finish() {
 	if !mc.watching || mc.finished == nil {
 		return
@@ -454,6 +494,7 @@ func (mc *mysqlConn) finish() {
 }
 
 // Ping implements driver.Pinger interface
+// Ping实现了driver.Pinger接口
 func (mc *mysqlConn) Ping(ctx context.Context) (err error) {
 	if mc.closed.Load() {
 		return driver.ErrBadConn
@@ -473,6 +514,7 @@ func (mc *mysqlConn) Ping(ctx context.Context) (err error) {
 }
 
 // BeginTx implements driver.ConnBeginTx interface
+// BeginTx实现了driver.ConnBeginTx接口
 func (mc *mysqlConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
 	if mc.closed.Load() {
 		return nil, driver.ErrBadConn
@@ -587,18 +629,23 @@ func (mc *mysqlConn) watchCancel(ctx context.Context) error {
 	if mc.watching {
 		// Reach here if canceled,
 		// so the connection is already invalid
+		// 如果取消，则到达此处，
+		// 因此连接已经无效
 		mc.cleanup()
 		return nil
 	}
 	// When ctx is already cancelled, don't watch it.
+	// 当ctx已取消时，不要监视它。
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	// When ctx is not cancellable, don't watch it.
+	// 当ctx不可取消时，不要监视它。
 	if ctx.Done() == nil {
 		return nil
 	}
 	// When watcher is not alive, can't watch it.
+	// 当监视器不活跃时，无法监视它。
 	if mc.watcher == nil {
 		return nil
 	}
@@ -640,6 +687,8 @@ func (mc *mysqlConn) CheckNamedValue(nv *driver.NamedValue) (err error) {
 
 // ResetSession implements driver.SessionResetter.
 // (From Go 1.10)
+// ResetSession实现了driver.SessionResetter。
+// (来自Go 1.10)
 func (mc *mysqlConn) ResetSession(ctx context.Context) error {
 	if mc.closed.Load() || mc.buf.busy() {
 		return driver.ErrBadConn
@@ -651,6 +700,9 @@ func (mc *mysqlConn) ResetSession(ctx context.Context) error {
 	// to be stale, and it has not performed any previous writes that
 	// could cause data corruption, so it's safe to return ErrBadConn
 	// if the check fails.
+	// 执行陈旧连接检查。我们仅对从连接池中检出的连接的第一个查询执行此检查：
+	// 来自池的新连接更有可能是陈旧的，并且它没有执行任何可能导致数据损坏的先前写入，
+	// 因此如果检查失败，返回ErrBadConn是安全的。
 	if mc.cfg.CheckConnLiveness {
 		conn := mc.netConn
 		if mc.rawConn != nil {
@@ -674,6 +726,8 @@ func (mc *mysqlConn) ResetSession(ctx context.Context) error {
 
 // IsValid implements driver.Validator interface
 // (From Go 1.15)
+// IsValid实现了driver.Validator接口
+// (来自Go 1.15)
 func (mc *mysqlConn) IsValid() bool {
 	return !mc.closed.Load() && !mc.buf.busy()
 }

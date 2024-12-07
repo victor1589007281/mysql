@@ -35,49 +35,55 @@ var (
 // If a new Config is created instead of being parsed from a DSN string,
 // the NewConfig function should be used, which sets default values.
 type Config struct {
-	// non boolean fields
+	// 基础连接信息
+	User   string // 数据库用户名
+	Passwd string // 数据库密码(需要配合User使用)
+	Net    string // 网络类型 (如 "tcp", "tcp6", "unix"，默认为 "tcp")
+	Addr   string // 连接地址 (tcp默认为 "127.0.0.1:3306"，unix默认为 "/tmp/mysql.sock")
+	DBName string // 数据库名称
 
-	User                 string            // Username
-	Passwd               string            // Password (requires User)
-	Net                  string            // Network (e.g. "tcp", "tcp6", "unix". default: "tcp")
-	Addr                 string            // Address (default: "127.0.0.1:3306" for "tcp" and "/tmp/mysql.sock" for "unix")
-	DBName               string            // Database name
-	Params               map[string]string // Connection parameters
-	ConnectionAttributes string            // Connection Attributes, comma-delimited string of user-defined "key:value" pairs
-	charsets             []string          // Connection charset. When set, this will be set in SET NAMES <charset> query
-	Collation            string            // Connection collation. When set, this will be set in SET NAMES <charset> COLLATE <collation> query
-	Loc                  *time.Location    // Location for time.Time values
-	MaxAllowedPacket     int               // Max packet size allowed
-	ServerPubKey         string            // Server public key name
-	TLSConfig            string            // TLS configuration name
-	TLS                  *tls.Config       // TLS configuration, its priority is higher than TLSConfig
-	Timeout              time.Duration     // Dial timeout
-	ReadTimeout          time.Duration     // I/O read timeout
-	WriteTimeout         time.Duration     // I/O write timeout
-	Logger               Logger            // Logger
-	// DialFunc specifies the dial function for creating connections
-	DialFunc func(ctx context.Context, network, addr string) (net.Conn, error)
+	// 连接参数和属性
+	Params               map[string]string // 额外的连接参数，键值对形式
+	ConnectionAttributes string            // 连接属性，以逗号分隔的"key:value"对
+	charsets             []string          // 连接字符集，会通过 SET NAMES <charset> 设置
+	Collation            string            // 字符排序规则，会通过 SET NAMES <charset> COLLATE <collation> 设置
 
-	// boolean fields
+	// 时间和位置相关
+	Loc          *time.Location // 用于time.Time值的时区设置
+	timeTruncate time.Duration  // time.Time值的截断精度
 
-	AllowAllFiles            bool // Allow all files to be used with LOAD DATA LOCAL INFILE
-	AllowCleartextPasswords  bool // Allows the cleartext client side plugin
-	AllowFallbackToPlaintext bool // Allows fallback to unencrypted connection if server does not support TLS
-	AllowNativePasswords     bool // Allows the native password authentication method
-	AllowOldPasswords        bool // Allows the old insecure password method
-	CheckConnLiveness        bool // Check connections for liveness before using them
-	ClientFoundRows          bool // Return number of matching rows instead of rows changed
-	ColumnsWithAlias         bool // Prepend table alias to column names
-	InterpolateParams        bool // Interpolate placeholders into query string
-	MultiStatements          bool // Allow multiple statements in one query
-	ParseTime                bool // Parse time values to time.Time
-	RejectReadOnly           bool // Reject read-only connections
+	// 网络和安全配置
+	MaxAllowedPacket int         // 允许的最大数据包大小
+	ServerPubKey     string      // 服务器公钥名称
+	TLSConfig        string      // TLS配置名称
+	TLS              *tls.Config // TLS配置对象，优先级高于TLSConfig
 
-	// unexported fields. new options should be come here
+	// 超时设置
+	Timeout      time.Duration // 连接超时时间
+	ReadTimeout  time.Duration // I/O读取超时时间
+	WriteTimeout time.Duration // I/O写入超时时间
 
-	beforeConnect func(context.Context, *Config) error // Invoked before a connection is established
-	pubKey        *rsa.PublicKey                       // Server public key
-	timeTruncate  time.Duration                        // Truncate time.Time values to the specified duration
+	// 功能组件
+	Logger   Logger                                                            // 日志记录器
+	DialFunc func(ctx context.Context, network, addr string) (net.Conn, error) // 自定义连接创建函数
+
+	// 布尔类型配置
+	AllowAllFiles            bool // 是否允许使用LOAD DATA LOCAL INFILE加载所有文件
+	AllowCleartextPasswords  bool // 是否允许明文密码认证插件
+	AllowFallbackToPlaintext bool // 当服务器不支持TLS时是否允许降级为非加密连接
+	AllowNativePasswords     bool // 是否允许原生密码认证方式
+	AllowOldPasswords        bool // 是否允许旧的不安全密码方式
+	CheckConnLiveness        bool // 使用连接前是否检查连接活跃性
+	ClientFoundRows          bool // 是否返回匹配的行数而不是改变的行数
+	ColumnsWithAlias         bool // 是否在列名前加表别名
+	InterpolateParams        bool // 是否在查询字符串中插入占位符
+	MultiStatements          bool // 是否允许在一个查询中执行多个语句
+	ParseTime                bool // 是否自动解析时间值为time.Time
+	RejectReadOnly           bool // 是否拒绝只读连接
+
+	// 内部使用的非导出字段
+	beforeConnect func(context.Context, *Config) error // 建立连接前的回调函数
+	pubKey        *rsa.PublicKey                       // 服务器公钥对象
 }
 
 // Functional Options Pattern

@@ -25,28 +25,46 @@ import (
 
 // mysqlConn表示与MySQL服务器的连接。
 type mysqlConn struct {
-	buf              buffer
-	netConn          net.Conn
-	rawConn          net.Conn    // underlying connection when netConn is TLS connection.
-	result           mysqlResult // managed by clearResult() and handleOkPacket().
-	cfg              *Config
-	connector        *connector
+	// 用于网络读写的缓冲区
+	buf buffer
+	// 当前网络连接
+	netConn net.Conn
+	// TLS连接时的底层连接
+	rawConn net.Conn // underlying connection when netConn is TLS connection.
+	// 查询结果，由clearResult()和handleOkPacket()管理
+	result mysqlResult // managed by clearResult() and handleOkPacket().
+	// MySQL连接配置
+	cfg *Config
+	// 数据库连接器
+	connector *connector
+	// MySQL服务器允许的最大数据包大小
 	maxAllowedPacket int
-	maxWriteSize     int
-	writeTimeout     time.Duration
-	flags            clientFlag
-	status           statusFlag
-	sequence         uint8
-	parseTime        bool
+	// 单次写入的最大数据大小
+	maxWriteSize int
+	// 写入超时时间
+	writeTimeout time.Duration
+	// 客户端标志位
+	flags clientFlag
+	// 服务器状态标志位
+	status statusFlag
+	// MySQL协议序列号
+	sequence uint8
+	// 是否自动解析时间类型
+	parseTime bool
 
-	// for context support (Go 1.8+)
-	// 用于上下文支持 (Go 1.8+)
+	// 以下字段用于上下文支持 (Go 1.8+)
+	// 是否正在监视上下文
 	watching bool
-	watcher  chan<- context.Context
-	closech  chan struct{}
+	// 用于发送上下文的通道
+	watcher chan<- context.Context
+	// 连接关闭信号通道
+	closech chan struct{}
+	// 查询完成信号通道
 	finished chan<- struct{}
+	// 连接取消时的错误信息，非nil表示连接已取消
 	canceled atomicError // set non-nil if conn is canceled
-	closed   atomic.Bool // set when conn is closed, before closech is closed
+	// 连接是否已关闭的标志，在closech关闭前设置
+	closed atomic.Bool // set when conn is closed, before closech is closed
 }
 
 // Helper function to call per-connection logger.
@@ -700,7 +718,7 @@ func (mc *mysqlConn) ResetSession(ctx context.Context) error {
 	// to be stale, and it has not performed any previous writes that
 	// could cause data corruption, so it's safe to return ErrBadConn
 	// if the check fails.
-	// 执行陈旧连接检查。我们仅对从连接池中检出的连接的第一个查询执行此检查：
+	// 执行陈旧连接检查。我们仅对从���接池中检出的连接的第一个查询执行此检查：
 	// 来自池的新连接更有可能是陈旧的，并且它没有执行任何可能导致数据损坏的先前写入，
 	// 因此如果检查失败，返回ErrBadConn是安全的。
 	if mc.cfg.CheckConnLiveness {
